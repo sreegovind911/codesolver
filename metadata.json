@@ -1,0 +1,6 @@
+{
+  "name": "CodeSolver AI",
+  "description": "An AI-powered student learning, coding, and tutoring platform with universal code conversion, debugger, textbook scanner and camera OCR.",
+  "requestFramePermissions": ["camera", "microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
