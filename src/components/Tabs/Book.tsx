@@ -96,7 +96,10 @@ export default function Book({
       if (response.ok) {
         setBookResponse(data.text);
       } else {
-        throw new Error(data.error || 'Server processing failed. Please try again.');
+        const errMsg = typeof data.error === 'object' && data.error?.message 
+          ? data.error.message 
+          : (typeof data.error === 'string' ? data.error : 'Server processing failed. Please try again.');
+        throw new Error(errMsg);
       }
     } catch (err: any) {
       setError(err.message || 'Connecting to textbook assistant failed.');

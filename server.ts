@@ -30,22 +30,59 @@ app.use((req, res, next) => {
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Lazy init the GenAI client to prevent startup crashes when API key is missing
-let aiClientInstance: GoogleGenAI | null = null;
+/**
+ * Cleanly formats AI errors to prevent raw JSON strings or 403 leaked key messages from cluttering the client UI.
+ */
+function formatAIError(error: any): string {
+  let msg = error?.message || (typeof error === 'string' ? error : '');
+  if (!msg && error) {
+    try {
+      msg = JSON.stringify(error);
+    } catch {
+      msg = String(error);
+    }
+  }
+
+  if (
+    msg.includes('API key was reported as leaked') ||
+    msg.includes('API_KEY_INVALID') ||
+    msg.includes('PERMISSION_DENIED') ||
+    msg.includes('API key not valid')
+  ) {
+    return 'Your Gemini API key is invalid or has been revoked (reported as leaked). Please obtain a valid API key from Google AI Studio (https://aistudio.google.com/app/apikey) and set GEMINI_API_KEY in your .env file or server environment.';
+  }
+
+  const currentKey = process.env.GEMINI_API_KEY;
+  if (!currentKey || currentKey === 'YOUR_GEMINI_API_KEY_HERE') {
+    return 'GEMINI_API_KEY is not configured. Please set a valid GEMINI_API_KEY in your .env file or server environment variables.';
+  }
+
+  try {
+    const parsed = typeof msg === 'string' && msg.startsWith('{') ? JSON.parse(msg) : null;
+    if (parsed?.error?.message) {
+      return parsed.error.message;
+    }
+  } catch (e) {
+    // Ignore JSON parse error
+  }
+
+  return msg || 'AI generation failed.';
+}
 
 function getAIClient() {
-  if (!aiClientInstance) {
-    const key = process.env.GEMINI_API_KEY || 'AIzaSyD4vJUfwPii_w9JM4DQJNJZCuGmwJZxfjc';
-    aiClientInstance = new GoogleGenAI({
-      apiKey: key,
-      httpOptions: {
-        headers: {
-          'User-Agent': 'aistudio-build',
-        },
-      },
-    });
+  const key = process.env.GEMINI_API_KEY;
+  if (!key || key === 'YOUR_GEMINI_API_KEY_HERE' || key === 'AIzaSyD4vJUfwPii_w9JM4DQJNJZCuGmwJZxfjc') {
+    throw new Error('GEMINI_API_KEY is missing or invalid. Please configure a valid GEMINI_API_KEY in your .env file or server environment settings.');
   }
-  return aiClientInstance;
+
+  return new GoogleGenAI({
+    apiKey: key,
+    httpOptions: {
+      headers: {
+        'User-Agent': 'codesolver-ai',
+      },
+    },
+  });
 }
 
 /**
@@ -66,6 +103,15 @@ async function generateWithFallback(ai: GoogleGenAI, params: any) {
     } catch (err: any) {
       console.warn(`Model ${model} request failed, attempting fallback... Error:`, err?.message || err);
       lastError = err;
+      const errMsg = err?.message || String(err);
+      if (
+        errMsg.includes('403') ||
+        errMsg.includes('PERMISSION_DENIED') ||
+        errMsg.includes('leaked') ||
+        errMsg.includes('API_KEY_INVALID')
+      ) {
+        break; // Don't retry fallback models if API key itself is invalid or revoked
+      }
       await new Promise((resolve) => setTimeout(resolve, 300));
     }
   }
@@ -75,10 +121,17 @@ async function generateWithFallback(ai: GoogleGenAI, params: any) {
 
 // Global active-solves checking / ad-earning helpers can be client-side stored, but let's provide some server confirmation
 app.get(['/api/health', '/health'], (req, res) => {
+  const key = process.env.GEMINI_API_KEY;
+  const isAvailable = !!(
+    key &&
+    key !== 'YOUR_GEMINI_API_KEY_HERE' &&
+    key !== 'AIzaSyD4vJUfwPii_w9JM4DQJNJZCuGmwJZxfjc'
+  );
   res.json({
     status: 'ok',
+    appName: 'CodeSolver AI',
     currentTime: new Date().toISOString(),
-    apiKeyAvailable: !!(process.env.GEMINI_API_KEY || 'AIzaSyD4vJUfwPii_w9JM4DQJNJZCuGmwJZxfjc'),
+    apiKeyAvailable: isAvailable,
   });
 });
 
@@ -113,7 +166,7 @@ Provide the solution using markdown code blocks, keeping explanations brief and 
     res.json({ text: response.text });
   } catch (error: any) {
     console.error('Solve Error:', error);
-    res.status(500).json({ error: error.message || 'AI generation failed' });
+    res.status(500).json({ error: formatAIError(error) });
   }
 });
 
@@ -144,7 +197,7 @@ Provide the converted code inside a code block, keeping any additional explanati
     res.json({ text: response.text });
   } catch (error: any) {
     console.error('Convert Error:', error);
-    res.status(500).json({ error: error.message || 'AI generation failed' });
+    res.status(500).json({ error: formatAIError(error) });
   }
 });
 
@@ -175,7 +228,7 @@ Avoid grandiose titles, self-praise, or unnecessary introductory fluff. Keep you
     res.json({ text: response.text });
   } catch (error: any) {
     console.error('Debug Error:', error);
-    res.status(500).json({ error: error.message || 'AI generation failed' });
+    res.status(500).json({ error: formatAIError(error) });
   }
 });
 
@@ -206,7 +259,7 @@ If the student asks a simple question (e.g., "1+1" or similar direct simple quer
     res.json({ text: response.text });
   } catch (error: any) {
     console.error('Ask Q&A Error:', error);
-    res.status(500).json({ error: error.message || 'AI Q&A failed' });
+    res.status(500).json({ error: formatAIError(error) });
   }
 });
 
@@ -252,7 +305,7 @@ app.post(['/api/scan', '/scan'], async (req, res) => {
     res.json({ text: response.text });
   } catch (error: any) {
     console.error('OCR Scan Error:', error);
-    res.status(500).json({ error: error.message || 'OCR Image Scanning failed' });
+    res.status(500).json({ error: formatAIError(error) });
   }
 });
 
@@ -315,7 +368,7 @@ Task: Address the user's specific query about this textbook content or syllabus 
     res.json({ text: response.text });
   } catch (error: any) {
     console.error('Book Analyze Error:', error);
-    res.status(500).json({ error: error.message || 'Textbook academic analysis failed' });
+    res.status(500).json({ error: formatAIError(error) });
   }
 });
 
@@ -349,7 +402,7 @@ If the student asks a simple question (for example, a simple math problem like "
     res.json({ text: response.text });
   } catch (error: any) {
     console.error('Tutor Error:', error);
-    res.status(500).json({ error: error.message || 'AI Tutor failed' });
+    res.status(500).json({ error: formatAIError(error) });
   }
 });
 
@@ -437,7 +490,7 @@ Format the JSON response array strictly according to the defined schema.`;
     res.json({ quizzes: decoratedQuizzes });
   } catch (error: any) {
     console.error('Quiz Generation Error:', error);
-    res.status(500).json({ error: error.message || 'AI quiz generation failed' });
+    res.status(500).json({ error: formatAIError(error) });
   }
 });
 
@@ -530,7 +583,7 @@ Selected Category: ${chapter}`;
     res.json({ questions: decoratedQuestions });
   } catch (error: any) {
     console.error('Textbook Quiz Gen Error:', error);
-    res.status(500).json({ error: error.message || 'Textbook quiz generation failed' });
+    res.status(500).json({ error: formatAIError(error) });
   }
 });
 

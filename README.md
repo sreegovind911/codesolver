@@ -1,20 +1,14 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
 
-# Run and deploy your AI Studio app
+# CODE SOLVER - AI Academic Companion
 
-This contains everything you need to run your app locally.
+Everything you need to run and deploy CodeSolver AI locally or on cloud servers.
 
-View your app in AI Studio: https://ai.studio/apps/e0d90303-950b-4822-b736-a9ccdd03a519
-
-## Run Locally
-
-**Prerequisites:**  Node.js
-
+## Setup & Configuration
 
 1. Install dependencies:
    `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
+
+3. Set `GEMINI_API_KEY` in your `.env` file or deployment environment variables.
+4. Run the app:
    `npm run dev`
+
