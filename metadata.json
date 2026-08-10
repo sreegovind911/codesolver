@@ -1,6 +1,11 @@
 {
-  "name": "CodeSolver AI",
-  "description": "An AI-powered student learning, coding, and tutoring platform with universal code conversion, debugger, textbook scanner and camera OCR.",
-  "requestFramePermissions": ["camera", "microphone"],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "name": "Remix CodeSolver AI",
+  "description": "An AI coding assistant for students featuring code generation, debugging, OCR scanning, and personalized tutoring for any programming language.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }

@@ -40,6 +40,31 @@ function getAIClient() {
   return aiClientInstance;
 }
 
+/**
+ * Robust wrapper around ai.models.generateContent that retries across
+ * fallback model aliases when facing temporary 503 high demand spikes or model errors.
+ */
+async function generateWithFallback(ai: GoogleGenAI, params: any) {
+  const modelsToTry = ['gemini-3.6-flash', 'gemini-flash-latest', 'gemini-3.1-flash-lite'];
+  let lastError: any = null;
+
+  for (const model of modelsToTry) {
+    try {
+      const response = await ai.models.generateContent({
+        ...params,
+        model,
+      });
+      return response;
+    } catch (err: any) {
+      console.warn(`Model ${model} request failed, attempting fallback... Error:`, err?.message || err);
+      lastError = err;
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    }
+  }
+
+  throw lastError;
+}
+
 // Global active-solves checking / ad-earning helpers can be client-side stored, but let's provide some server confirmation
 app.get('/api/health', (req, res) => {
   res.json({
@@ -68,8 +93,7 @@ If the user asks a simple question, answer it directly and shortly in a single s
 You MUST write all programming solution code blocks strictly in the following target language: ${targetLang}.
 Provide the solution using markdown code blocks, keeping explanations brief and clear.`;
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.5-flash',
+    const response = await generateWithFallback(ai, {
       contents: prompt,
       config: {
         systemInstruction: systemPrompt,
@@ -100,8 +124,7 @@ app.post('/api/convert', async (req, res) => {
 Convert this code ${sourceLanguage ? `from ${sourceLanguage}` : '(auto-detected)'} to ${targetLanguage}.
 Provide the converted code inside a code block, keeping any additional explanation and comments minimal, direct, and short. Avoid verbose introductory text, grandiose roles, or self-praise.`;
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.5-flash',
+    const response = await generateWithFallback(ai, {
       contents: code,
       config: {
         systemInstruction: systemPrompt,
@@ -132,8 +155,7 @@ app.post('/api/debug', async (req, res) => {
 Identify the bug in the provided code, briefly explain what is wrong, and provide the corrected code directly and briefly.
 Avoid grandiose titles, self-praise, or unnecessary introductory fluff. Keep your answers as short, concise, and direct as possible.`;
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.5-flash',
+    const response = await generateWithFallback(ai, {
       contents: code,
       config: {
         systemInstruction: systemPrompt,
@@ -164,8 +186,7 @@ app.post('/api/ask', async (req, res) => {
 Answer coding doubts, theoretical questions, or simple math/computer science queries directly and concisely.
 If the student asks a simple question (e.g., "1+1" or similar direct simple queries), provide a polite, extremely short, direct answer (e.g., "2" or "The answer is 2.") without any grandiose prefixes, unsolicited explanations, pre-pended branding, or extra conversational fluff.`;
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.5-flash',
+    const response = await generateWithFallback(ai, {
       contents: question,
       config: {
         systemInstruction: systemPrompt,
@@ -214,8 +235,7 @@ app.post('/api/scan', async (req, res) => {
       text: scanPrompt,
     };
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.5-flash',
+    const response = await generateWithFallback(ai, {
       contents: { parts: [imagePart, textPart] },
     });
 
@@ -275,8 +295,7 @@ Task: Address the user's specific query about this textbook content or syllabus 
 
     parts.push({ text: userPrompt });
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.5-flash',
+    const response = await generateWithFallback(ai, {
       contents: { parts },
       config: {
         systemInstruction,
@@ -309,8 +328,7 @@ Your objective is to explain concepts for subjects (Math, Science, English, Comp
 Provide direct, short, highly clear answers.
 If the student asks a simple question (for example, a simple math problem like "1+1" or similar direct queries), answer it directly and immediately (e.g., "2" or "The answer is 2.") without any extra conversational fluff or unnecessary long lessons. Do not use grandiose titles or self-praise.`;
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.5-flash',
+    const response = await generateWithFallback(ai, {
       contents: query,
       config: {
         systemInstruction: systemPrompt,
@@ -348,35 +366,57 @@ Each quiz must contain:
 Avoid generic or trivial print statement codes. Make them interesting for developers.
 Format the JSON response array strictly according to the defined schema.`;
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.5-flash',
-      contents: `Generate ${count} tricky code prediction quizzes.`,
-      config: {
-        systemInstruction: systemPrompt,
-        temperature: 0.7,
-        responseMimeType: 'application/json',
-        responseSchema: {
-          type: Type.ARRAY,
-          items: {
-            type: Type.OBJECT,
-            properties: {
-              language: { type: Type.STRING },
-              code: { type: Type.STRING },
-              options: {
-                type: Type.ARRAY,
-                items: { type: Type.STRING }
+    let quizzes: any[] = [];
+    try {
+      const response = await generateWithFallback(ai, {
+        contents: `Generate ${count} tricky code prediction quizzes.`,
+        config: {
+          systemInstruction: systemPrompt,
+          temperature: 0.7,
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                language: { type: Type.STRING },
+                code: { type: Type.STRING },
+                options: {
+                  type: Type.ARRAY,
+                  items: { type: Type.STRING }
+                },
+                correctAnswer: { type: Type.STRING },
+                explanation: { type: Type.STRING }
               },
-              correctAnswer: { type: Type.STRING },
-              explanation: { type: Type.STRING }
-            },
-            required: ['language', 'code', 'options', 'correctAnswer', 'explanation']
+              required: ['language', 'code', 'options', 'correctAnswer', 'explanation']
+            }
           }
-        }
-      },
-    });
+        },
+      });
 
-    const text = response.text || '[]';
-    const quizzes = JSON.parse(text.trim());
+      const text = response.text || '[]';
+      quizzes = JSON.parse(text.trim());
+    } catch (aiErr: any) {
+      console.warn('AI Quiz generation error, serving fallback quizzes:', aiErr?.message || aiErr);
+      // Fallback quizzes when API limit/spike is reached
+      const chosenLang = language && language !== 'Random' ? language : 'Python';
+      quizzes = [
+        {
+          language: chosenLang,
+          code: chosenLang === 'Python' ? `x = [1, 2, 3]\ny = x\ny.append(4)\nprint(len(x))` : `let a = [1, 2, 3];\nlet b = a;\nb.push(4);\nconsole.log(a.length);`,
+          options: ['3', '4', 'TypeError', 'Undefined'],
+          correctAnswer: '4',
+          explanation: 'In Python and JavaScript, objects and lists are passed by reference. Modifying y/b mutates the underlying array x/a.',
+        },
+        {
+          language: chosenLang,
+          code: chosenLang === 'Python' ? `print(type(1 / 1))` : `console.log(typeof (1 / 2));`,
+          options: chosenLang === 'Python' ? ["<class 'int'>", "<class 'float'>", "<class 'number'>", 'SyntaxError'] : ['"integer"', '"number"', '"float"', 'NaN'],
+          correctAnswer: chosenLang === 'Python' ? "<class 'float'>" : '"number"',
+          explanation: 'In Python 3, division with / always returns a float. In JavaScript, all numbers are double-precision floats of type "number".',
+        },
+      ];
+    }
     
     // Assign random unique IDs to each generated quiz
     const decoratedQuizzes = quizzes.map((quiz: any, idx: number) => ({
@@ -388,6 +428,99 @@ Format the JSON response array strictly according to the defined schema.`;
   } catch (error: any) {
     console.error('Quiz Generation Error:', error);
     res.status(500).json({ error: error.message || 'AI quiz generation failed' });
+  }
+});
+
+/**
+ * Endpoint: /api/quizzes/textbook
+ * Goal: Generates textbook-specific quizzes tailored to selected chapters based ONLY on textbook content.
+ */
+app.post('/api/quizzes/textbook', async (req, res) => {
+  try {
+    const { bookName, bookImage, bookResponse, chapter = 'Chapter 1', count = 5 } = req.body;
+    const ai = getAIClient();
+
+    const systemPrompt = `You are an academic assessment creator at "CodeSolver AI".
+Your task is to generate high-quality textbook quiz questions based STRICTLY on the provided textbook title, text content, image OCR, or syllabus details.
+DO NOT generate random questions unrelated to the textbook or topic.
+
+Generate exactly ${count} quiz questions for the category: "${chapter}".
+Include a variety of question types appropriate for student testing:
+- multiple_choice
+- true_false
+- fill_in_blank
+- concept_based
+
+For each question:
+1. "type": One of "multiple_choice", "true_false", "fill_in_blank", "concept_based".
+2. "question": Clear, direct question text strictly about the textbook topic.
+3. "options": Array of 2 to 4 answer choices.
+4. "correctAnswer": Exact string matching one of the choices.
+5. "explanation": A concise, accurate explanation based directly on the textbook content.
+
+Return JSON array adhering strictly to the response schema.`;
+
+    const parts: any[] = [];
+    if (bookImage) {
+      const base64Data = bookImage.split(',')[1] || bookImage;
+      parts.push({
+        inlineData: {
+          mimeType: 'image/png',
+          data: base64Data,
+        },
+      });
+    }
+
+    const contextText = `Textbook Reference / Title: ${bookName || 'Scanned Textbook'}
+Textbook Content / Syllabus / Notes: ${bookResponse || 'Standard textbook curriculum'}
+Selected Category: ${chapter}`;
+
+    parts.push({ text: `Generate ${count} quiz questions for ${chapter} based on this textbook content:\n\n${contextText}` });
+
+    const response = await generateWithFallback(ai, {
+      contents: { parts },
+      config: {
+        systemInstruction: systemPrompt,
+        temperature: 0.5,
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              type: { type: Type.STRING },
+              question: { type: Type.STRING },
+              options: {
+                type: Type.ARRAY,
+                items: { type: Type.STRING },
+              },
+              correctAnswer: { type: Type.STRING },
+              explanation: { type: Type.STRING },
+            },
+            required: ['type', 'question', 'options', 'correctAnswer', 'explanation'],
+          },
+        },
+      },
+    });
+
+    const text = response.text || '[]';
+    const rawQuestions = JSON.parse(text.trim());
+
+    const decoratedQuestions = rawQuestions.map((q: any, idx: number) => ({
+      id: `tb_q_${Date.now()}_${idx}`,
+      type: q.type || 'multiple_choice',
+      questionNumber: idx + 1,
+      question: q.question,
+      options: q.options || [],
+      correctAnswer: q.correctAnswer,
+      explanation: q.explanation,
+      chapter: chapter,
+    }));
+
+    res.json({ questions: decoratedQuestions });
+  } catch (error: any) {
+    console.error('Textbook Quiz Gen Error:', error);
+    res.status(500).json({ error: error.message || 'Textbook quiz generation failed' });
   }
 });
 
@@ -405,6 +538,20 @@ async function initServer() {
     // In prod, serve compiled static assets from dist
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
+
+    // Support direct root redirection html pages if loaded directly (e.g. login.html, signup.html)
+    app.get('/:page.html', (req, res, next) => {
+      const pageFile = req.params.page + '.html';
+      if (pageFile === 'index.html') {
+        return next();
+      }
+      const filePath = path.join(process.cwd(), pageFile);
+      res.sendFile(filePath, (err) => {
+        if (err) {
+          next();
+        }
+      });
+    });
 
     // Support clean URL routing
     app.get('*', (req, res) => {
