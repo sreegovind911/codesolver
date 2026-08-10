@@ -88,7 +88,8 @@ app.get(['/api/health', '/health'], (req, res) => {
  */
 app.post(['/api/solve', '/solve'], async (req, res) => {
   try {
-    const { prompt, language } = req.body;
+    const prompt = req.body.prompt || req.body.question || req.body.query;
+    const language = req.body.language;
     if (!prompt) {
       return res.status(400).json({ error: 'Snippet prompt is required.' });
     }
@@ -184,7 +185,7 @@ Avoid grandiose titles, self-praise, or unnecessary introductory fluff. Keep you
  */
 app.post(['/api/ask', '/ask'], async (req, res) => {
   try {
-    const { question } = req.body;
+    const question = req.body.question || req.body.query || req.body.prompt;
     if (!question) {
       return res.status(400).json({ error: 'Question is required.' });
     }
@@ -324,7 +325,8 @@ Task: Address the user's specific query about this textbook content or syllabus 
  */
 app.post(['/api/tutor', '/tutor'], async (req, res) => {
   try {
-    const { subject, query } = req.body;
+    const query = req.body.query || req.body.question || req.body.prompt;
+    const subject = req.body.subject;
     if (!query) {
       return res.status(400).json({ error: 'Query is required.' });
     }

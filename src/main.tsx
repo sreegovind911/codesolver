@@ -4,7 +4,20 @@ import App from './App.tsx';
 import './index.css';
 
 // Automatically route relative /api requests to the live Cloud Run backend when running on packaged Android assets
+// Automatically route relative /api requests when running on packaged standalone mobile webview assets (capacitor:)
 const originalFetch = window.fetch;
+
+function resolveApiUrl(inputUrl: string): string {
+  if (typeof inputUrl === 'string' && (inputUrl.startsWith('/api/') || inputUrl.startsWith('/'))) {
+    // Only rewrite URL if running inside packaged Capacitor/file: mobile environment where window.location is not http/https
+    if (window.location.protocol === 'capacitor:' || window.location.protocol === 'file:') {
+      const remoteServerUrl = 'http://localhost:3000';
+      return `${remoteServerUrl}${inputUrl.startsWith('/') ? '' : '/'}${inputUrl}`;
+    }
+  }
+  return inputUrl;
+}
+
 try {
   Object.defineProperty(window, 'fetch', {
     configurable: true,
@@ -20,71 +33,20 @@ try {
         url = input.url;
       }
 
-      if (url.startsWith('/api/')) {
-        const isLocalMobile =
-          window.location.protocol === 'capacitor:' ||
-          window.location.hostname === 'localhost' ||
-          window.location.hostname === '127.0.0.1';
-
-        if (isLocalMobile) {
-          const remoteServerUrl = 'https://ais-dev-a5biqcpfrkbmyoi5mytwok-81507452437.asia-east1.run.app';
-          url = remoteServerUrl + url;
-        }
-      }
+      const finalUrl = resolveApiUrl(url);
 
       if (typeof input === 'string') {
-        return originalFetch(url, init);
+        return originalFetch(finalUrl, init);
       } else if (input instanceof URL) {
-        return originalFetch(new URL(url), init);
+        return originalFetch(new URL(finalUrl), init);
       } else {
-        const newRequest = new Request(url, input);
+        const newRequest = new Request(finalUrl, input);
         return originalFetch(newRequest, init);
       }
-    }
+    },
   });
 } catch (e) {
-  console.warn('Unable to redefine window.fetch via Object.defineProperty, falling back to prototype override:', e);
-  try {
-    // If defining on window itself fails, try Window.prototype
-    Object.defineProperty(Window.prototype, 'fetch', {
-      configurable: true,
-      enumerable: true,
-      writable: true,
-      value: function (input: any, init?: any): Promise<Response> {
-        let url = '';
-        if (typeof input === 'string') {
-          url = input;
-        } else if (input instanceof URL) {
-          url = input.toString();
-        } else if (input && typeof input.url === 'string') {
-          url = input.url;
-        }
-
-        if (url.startsWith('/api/')) {
-          const isLocalMobile =
-            window.location.protocol === 'capacitor:' ||
-            window.location.hostname === 'localhost' ||
-            window.location.hostname === '127.0.0.1';
-
-          if (isLocalMobile) {
-            const remoteServerUrl = 'https://ais-dev-a5biqcpfrkbmyoi5mytwok-81507452437.asia-east1.run.app';
-            url = remoteServerUrl + url;
-          }
-        }
-
-        if (typeof input === 'string') {
-          return originalFetch(url, init);
-        } else if (input instanceof URL) {
-          return originalFetch(new URL(url), init);
-        } else {
-          const newRequest = new Request(url, input);
-          return originalFetch(newRequest, init);
-        }
-      }
-    });
-  } catch (err) {
-    console.error('Failed to monkeypatch fetch completely:', err);
-  }
+  console.warn('Fetch override warning:', e);
 }
 
 createRoot(document.getElementById('root')!).render(
